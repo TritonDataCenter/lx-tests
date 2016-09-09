@@ -3,6 +3,7 @@
 #
 
 TARGETS = \
+	mount_nfs \
 	mount_tmpfs \
 	uname
 

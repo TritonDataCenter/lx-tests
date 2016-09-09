@@ -1,0 +1,18 @@
+# This is an example test configuration file.
+#
+# The tests use environment variables for configuration. Copy this file to
+# 'conf' and edit it to set the environment variables correctly for your
+# configuration. Source 'conf' into your shell before running the tests.
+#
+# Tests that require configuration are optional. If the environment variables
+# are not set, those tests will be skipped.
+
+# This is either the hostname or IP address of an NFS server to test against.
+# export LXTST_CONF_NFS_SERVER=gz
+
+# This is an exported filesystem to be mounted from the NFS server.
+# export LXTST_CONF_NFS_EXPORT=/zones/data
+
+# If provided, this should specify the port number that the NFS server's mountd
+# is listening on. This can be obtained via 'rpcinfo -p'.
+# export LXTST_CONF_MOUNTD_PORT=34310
