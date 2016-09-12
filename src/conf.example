@@ -13,6 +13,6 @@
 # This is an exported filesystem to be mounted from the NFS server.
 # export LXTST_CONF_NFS_EXPORT=/zones/data
 
-# If provided, this should specify the port number that the NFS server's mountd
-# is listening on. This can be obtained via 'rpcinfo -p'.
+# If provided, this should specify the TCP port number that the NFS server's
+# mountd is listening on. This can be obtained via 'rpcinfo -p'.
 # export LXTST_CONF_MOUNTD_PORT=34310
