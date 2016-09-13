@@ -95,7 +95,8 @@ check_self_stat()
 			/*
 			 * startstack - field 28
 			 * We previously reported USRSTACK, which is USERLIMIT,
-			 * which is 0xfffffd7fffe00000.
+			 * which is 0xfffffd7fffe00000. See the definition for
+			 * LX_MAXSTACK64 is the lx kernel source.
 			 */
 			errno = 0;
 			val = atoll(f);

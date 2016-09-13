@@ -6,7 +6,8 @@ TARGETS = \
 	mount_nfs \
 	mount_tmpfs \
 	procfs \
-	uname
+	uname \
+	vdisk
 
 CPPFLAGS +=
 
