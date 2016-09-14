@@ -1,31 +1,43 @@
 #
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+
+#
 # Copyright 2016 Joyent, Inc.
 #
 
-TARGETS = \
+TESTS = \
 	mount_nfs \
 	mount_tmpfs \
 	procfs \
 	uname \
 	vdisk
 
-CPPFLAGS +=
+SUBDIRS = vdso
+
+COMMON_OBJS = util.o
 
 CFLAGS += -Wall -Werror
 
-LDFLAGS += util.o
 
-all: util.o $(TARGETS)
+all: $(TESTS) $(SUBDIRS)
+	for d in $(SUBDIRS); do $(MAKE) -C $$d all; done
 
-util.o: util.c
-	@$(CC) $(CPPFLAGS) $(CFLAGS) -c util.c
+$(TESTS): %: %.c $(COMMON_OBJS)
+	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@
 
-test: all
-	@r=0; for i in $(TARGETS); \
+test: $(TESTS)
+	for d in $(SUBDIRS); do $(MAKE) -C $$d test; done
+	@r=0; for i in $(TESTS); \
 	do ./$$i; \
 		if [ $$? -ne 0 ]; then r=1; fi; \
 	done; \
 	if [ $$r -eq 1 ]; then echo "Some tests failed"; fi
 
 clean:
-	rm -f *.o $(TARGETS)
+	-for d in $(SUBDIRS); do $(MAKE) -C $$d clean; done
+	rm -f $(TESTS) $(COMMON_OBJS)
+
+.PHONY: test clean
