@@ -12,6 +12,7 @@ TESTS = \
 	mount_nfs \
 	mount_tmpfs \
 	procfs \
+	sched \
 	uname \
 	vdisk
 
@@ -21,15 +22,16 @@ COMMON_OBJS = util.o
 
 CFLAGS += -Wall -Werror
 
+sched: LDFLAGS += -lpthread
 
 all: $(TESTS) $(SUBDIRS)
-	for d in $(SUBDIRS); do $(MAKE) -C $$d all; done
+	@for d in $(SUBDIRS); do $(MAKE) -C $$d all; done
 
 $(TESTS): %: %.c $(COMMON_OBJS)
-	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@
+	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@ $(LDFLAGS)
 
 test: $(TESTS)
-	for d in $(SUBDIRS); do $(MAKE) -C $$d test; done
+	@for d in $(SUBDIRS); do $(MAKE) -C $$d test; done
 	@r=0; for i in $(TESTS); \
 	do ./$$i; \
 		if [ $$? -ne 0 ]; then r=1; fi; \
