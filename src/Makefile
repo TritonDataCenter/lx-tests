@@ -9,6 +9,7 @@
 #
 
 TESTS = \
+	clone \
 	mount_nfs \
 	mount_tmpfs \
 	procfs \
@@ -23,6 +24,7 @@ COMMON_OBJS = util.o
 CFLAGS += -Wall -Werror
 
 sched: LDFLAGS += -lpthread
+clone: LDFLAGS += -lpthread
 
 all: $(TESTS) $(SUBDIRS)
 	@for d in $(SUBDIRS); do $(MAKE) -C $$d all; done
