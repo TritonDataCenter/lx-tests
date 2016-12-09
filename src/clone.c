@@ -151,6 +151,18 @@ c4(void *a)
 }
 
 static int
+c5(void *a)
+{
+	int fd = (int)(long)a;
+
+	if (fchdir(fd) != 0) {
+		perror("child chdir failed\n");
+		exit(1);
+	}
+	exit(0);
+}
+
+static int
 thr(void *a)
 {
 	/* thread */
@@ -590,11 +602,54 @@ test12()
 }
 
 /*
+ * clone with supported flag subset (CLONE_FS) - validate that child changed
+ * our cwd using fchdir.
+ */
+static int
+test13()
+{
+	int fd;
+	int stat;
+	char buf[256];
+	char *stack, *top;
+
+	if ((stack = malloc(STACK_SIZE)) == NULL)
+		return (1);
+	top = stack + STACK_SIZE;
+
+	if (chdir("/") != 0)
+		return (2);
+	getcwd(buf, sizeof (buf));
+	if (strcmp(buf, "/") != 0)
+		return (3);
+
+	if ((fd = open("/tmp", O_RDONLY)) < 0)
+		return (4);
+
+	if (clone(c5, top, CLONE_FS | SIGCHLD, (void *)(long)fd, NULL, NULL,
+	    NULL) < 0)
+		return (5);
+
+	wait(&stat);
+	if (WEXITSTATUS(stat) != 0)
+		return (6);
+
+	(void) close(fd);
+
+	/* child should have changed our cwd */
+	getcwd(buf, sizeof (buf));
+	if (strcmp(buf, "/tmp") != 0)
+		return (7);
+
+	return (0);
+}
+
+/*
  * root-only; test chromium sandboxing where child chroots us into a directory
  * that will be gone when we try to open it.
  */
 static int
-test13()
+test99()
 {
 	int stat;
 	char *stack, *top;
@@ -664,11 +719,12 @@ main(int argc, char **argv)
 	run(10, test10);
 	run(11, test11);
 	run(12, test12);
+	run(13, test13);
 
 	if (!am_root)
 		return (test_pass("clone"));
 
-	run(13, test13);
+	run(99, test99);
 
 	return (test_pass("clone"));
 }
