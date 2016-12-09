@@ -21,6 +21,42 @@
 
 #define	STACK_SIZE	65536
 
+#define	THR_FLAGS	(CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | \
+			CLONE_THREAD)
+
+#ifndef CLONE_NEWNS
+#define	CLONE_NEWNS	0x00020000
+#endif
+
+#ifndef CLONE_NEWCGROUP
+#define	CLONE_NEWCGROUP	0x02000000
+#endif
+
+#ifndef CLONE_NEWUTS
+#define	CLONE_NEWUTS	0x04000000
+#endif
+
+#ifndef CLONE_NEWIPC
+#define	CLONE_NEWIPC	0x08000000
+#endif
+
+#ifndef CLONE_NEWUSER
+#define	CLONE_NEWUSER	0x10000000
+#endif
+
+#ifndef CLONE_NEWPID
+#define	CLONE_NEWPID	0x20000000
+#endif
+
+#ifndef CLONE_NEWNET
+#define	CLONE_NEWNET	0x40000000
+#endif
+
+#ifndef CLONE_IO
+#define	CLONE_IO	0x80000000
+#endif
+
+
 static int
 c1(void *a)
 {
@@ -121,7 +157,6 @@ thr(void *a)
 	pause();
         return (0);
 }
-
 
 /* clone with unsupported flag subset (CLONE_VM) - should fail */
 static int
@@ -501,12 +536,65 @@ test11()
 	return (0);
 }
 
+/* clone with unsupported namespace flags - should fail */
+static int
+test12()
+{
+	char *stack, *top;
+
+	if ((stack = malloc(STACK_SIZE)) == NULL)
+		return (1);
+	top = stack + STACK_SIZE;
+
+	if (clone(thr, top, CLONE_NEWNS | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_NEWCGROUP | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_NEWUTS | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_NEWIPC | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_NEWUSER | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_NEWPID | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_NEWNET | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	if (clone(thr, top, CLONE_IO | THR_FLAGS | SIGCHLD,
+	    NULL, NULL, NULL, NULL) >= 0) {
+		return (1);
+	}
+
+	return (0);
+}
+
 /*
  * root-only; test chromium sandboxing where child chroots us into a directory
  * that will be gone when we try to open it.
  */
 static int
-test12()
+test13()
 {
 	int stat;
 	char *stack, *top;
@@ -575,11 +663,12 @@ main(int argc, char **argv)
 	run(9, test9);
 	run(10, test10);
 	run(11, test11);
+	run(12, test12);
 
 	if (!am_root)
 		return (test_pass("clone"));
 
-	run(12, test12);
+	run(13, test13);
 
 	return (test_pass("clone"));
 }
