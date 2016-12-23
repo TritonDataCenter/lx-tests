@@ -14,6 +14,7 @@ TESTS = \
 	mount_tmpfs \
 	procfs \
 	sched \
+	socket \
 	uname \
 	vdisk
 
