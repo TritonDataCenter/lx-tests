@@ -9,7 +9,9 @@
 #
 
 TESTS = \
+	aio \
 	clone \
+	futex \
 	mount_nfs \
 	mount_tmpfs \
 	procfs \
@@ -26,6 +28,7 @@ CFLAGS += -Wall -Werror
 
 sched: LDFLAGS += -lpthread
 clone: LDFLAGS += -lpthread
+futex: LDFLAGS += -lpthread
 
 all: $(TESTS) $(SUBDIRS)
 	@for d in $(SUBDIRS); do $(MAKE) -C $$d all; done
