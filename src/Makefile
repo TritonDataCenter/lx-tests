@@ -26,6 +26,7 @@ COMMON_OBJS = util.o
 
 CFLAGS += -Wall -Werror
 
+aio: LDFLAGS += -lpthread
 sched: LDFLAGS += -lpthread
 clone: LDFLAGS += -lpthread
 futex: LDFLAGS += -lpthread
