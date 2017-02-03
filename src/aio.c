@@ -34,6 +34,7 @@
 static int tc;
 static char tst_file[80];
 
+static int is_lx = 0;
 static aio_context_t gctx;
 static int gztot;
 static int state;
@@ -1706,11 +1707,42 @@ test27(char *fname)
 	return (0);
 }
 
+/*
+ * Test the extremely broken behavior from libaio io_getevents() which assumes
+ * it can reference through the context as if it were a pointer to a
+ * well-defined structure in the process address space.
+ */
+static int
+test28(char *fname)
+{
+	aio_context_t ctx;
+	int rc, i;
+	char *p;
+
+	tc = 28;
+	ctx = 0;
+	rc = io_setup(NPAR, &ctx);
+	if (rc < 0)
+		t_err("setup", rc, errno);
+
+	p = (char *)ctx;
+	for (i = 0; i < 32; p++, i++) {
+		if (*p != '\0' && is_lx) {
+			printf("unexpected ctx element (%d): 0x%x\n", i, *p);
+		}
+	}
+
+	rc = io_destroy(ctx);
+	if (rc != 0)
+		t_err("destroy", rc, errno);
+
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
 	struct utsname nm;
-	int is_lx = 0;
 
 	delay.tv_sec = 0;
 	delay.tv_nsec = 1000000;
@@ -1748,6 +1780,7 @@ main(int argc, char **argv)
 	test25(tst_file);
 	test26(tst_file);
 	test27(tst_file);
+	test28(tst_file);
 
 	unlink(tst_file);
 	return (test_pass("aio"));
