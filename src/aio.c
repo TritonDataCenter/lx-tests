@@ -20,6 +20,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/utsname.h>
+#include <sys/eventfd.h>
 #include <linux/aio_abi.h>
 #include "lxtst.h"
 
@@ -38,6 +39,7 @@ static int is_lx = 0;
 static aio_context_t gctx;
 static int gztot;
 static int state;
+static int evfd;
 static struct timespec delay;
 
 static void
@@ -1739,6 +1741,155 @@ test28(char *fname)
 	return (0);
 }
 
+static void
+t29()
+{
+	int rc;
+	struct io_event events[3 * NPAR];
+
+	state = 1;
+	while (gztot != 0) {
+		int i;
+		uint64_t u;
+
+		if ((rc = read(evfd, &u, sizeof (u))) != sizeof (u))
+			t_err("eventfd read", rc, errno);
+
+		rc = io_getevents(gctx, 1, 3 * NPAR, events, NULL);
+		if (rc < 0)
+			t_err("getevents", rc, errno);
+
+		if (rc < u)
+			tfail("getevents did not get everything");
+
+		for (i = 0; i < rc; i++) {
+			struct io_event *ep = &events[i];
+			struct iocb *iop;
+
+			iop = (struct iocb *)ep->obj;
+			if (ep->res != BLKSIZE)
+				tfail("unexpected res");
+			free((void *)iop->aio_buf);
+			free(iop);
+		}
+
+		gztot -= rc;
+	}
+}
+
+/*
+ * Test eventfd notification with one thread waiting to get events based on
+ * eventfd notification. Loop 3 times submitting with a short delay to test
+ * re-reading eventfd.
+ */
+static int
+test29(char *fname)
+{
+	int fd, rc, i, j;
+	struct iocb **ioq;
+	pthread_t tid;
+
+	tc = 29;
+	if ((fd = open(fname, O_RDONLY)) < 0)
+		t_err("open", fd, errno);
+
+	if ((evfd = eventfd(0, 0)) < 0)
+		t_err("eventfd", evfd, errno);
+
+	gztot = 3 * NPAR;
+	state = 0;
+	pthread_create(&tid, NULL, (void *(*)(void *))t29, (void *)NULL);
+
+	/* wait for thread to be running */
+	while (state < 1)
+                nanosleep(&delay, NULL);
+
+	gctx = 0;
+	rc = io_setup(3 * NPAR, &gctx);
+	if (rc < 0)
+		t_err("setup", rc, errno);
+
+	ioq = (struct iocb **)malloc(sizeof (struct iocb *) * NPAR);
+	if (ioq == NULL)
+		tfail("out of memory");
+
+	for (j = 0 ; j < 3; j++) {
+		for (i = 0; i < NPAR; i++) {
+			ioq[i] = mk_cb(fd, IOCB_CMD_PREAD, i * BLKSIZE,
+			    (long)i);
+			ioq[i]->aio_flags = IOCB_FLAG_RESFD;
+			ioq[i]->aio_resfd = evfd;
+		}
+
+		rc = io_submit(gctx, NPAR, ioq);
+		if (rc != NPAR)
+			t_err("submit", rc, errno);
+
+		/* let reader do some work */
+		nanosleep(&delay, NULL);
+	}
+
+	pthread_join(tid, NULL);
+
+	rc = io_destroy(gctx);
+	if (rc != 0)
+		t_err("destroy", rc, errno);
+
+	close(fd);
+	close(evfd);
+	return (0);
+}
+
+/*
+ * Test eventfd notification with an invalid fd in one of the control blocks.
+ */
+static int
+test30(char *fname)
+{
+	int fd, rc, i;
+	struct iocb **ioq;
+	aio_context_t ctx;
+
+	tc = 30;
+	if ((fd = open(fname, O_RDONLY)) < 0)
+		t_err("open", fd, errno);
+
+	if ((evfd = eventfd(0, 0)) < 0)
+		t_err("eventfd", evfd, errno);
+
+	ctx = 0;
+	rc = io_setup(NPAR, &ctx);
+	if (rc < 0)
+		t_err("setup", rc, errno);
+
+	ioq = (struct iocb **)malloc(sizeof (struct iocb *) * NPAR);
+	if (ioq == NULL)
+		tfail("out of memory");
+
+	for (i = 0; i < NPAR; i++) {
+		ioq[i] = mk_cb(fd, IOCB_CMD_PREAD, i * BLKSIZE, (long)i);
+		ioq[i]->aio_flags = IOCB_FLAG_RESFD;
+		if (i == 2) {
+			ioq[i]->aio_resfd = 0;
+		} else {
+			ioq[i]->aio_resfd = evfd;
+		}
+	}
+
+	/* only 2 out of NPAR should be submitted since 3rd has bad aio_resfd */
+	rc = io_submit(ctx, NPAR, ioq);
+	if (rc != 2)
+		t_err("submit", rc, errno);
+
+	rc = io_destroy(ctx);
+	if (rc != 0)
+		t_err("destroy", rc, errno);
+
+	close(fd);
+	close(evfd);
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1781,6 +1932,8 @@ main(int argc, char **argv)
 	test26(tst_file);
 	test27(tst_file);
 	test28(tst_file);
+	test29(tst_file);
+	test30(tst_file);
 
 	unlink(tst_file);
 	return (test_pass("aio"));
