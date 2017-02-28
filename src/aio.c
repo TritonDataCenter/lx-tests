@@ -1890,6 +1890,39 @@ test30(char *fname)
 	return (0);
 }
 
+/*
+ * Test creating a large number of contexts up to our current max.
+ */
+static int
+test31(char *fname)
+{
+	int rc, i;
+	aio_context_t ctx, ctxa[512];
+
+	tc = 31;
+
+	for (i = 0; i < 512; i++) {
+		ctxa[i] = 0;
+		rc = io_setup(NPAR, &ctxa[i]);
+		if (rc < 0)
+			t_err("setup", rc, errno);
+	}
+
+	/* this should fail */
+	ctx = 0;
+	rc = io_setup(NPAR, &ctx);
+	if (rc == 0 || errno != ENOMEM)
+		tfail("io_setup of 513 context's succeeded");
+
+	for (i = 0; i < 512; i++) {
+		rc = io_destroy(ctxa[i]);
+		if (rc != 0)
+			t_err("destroy", rc, errno);
+	}
+
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1934,6 +1967,8 @@ main(int argc, char **argv)
 	test28(tst_file);
 	test29(tst_file);
 	test30(tst_file);
+	if (is_lx)	/* Linux can do more, but we don't care  */
+		test31(tst_file);
 
 	unlink(tst_file);
 	return (test_pass("aio"));
