@@ -32,6 +32,13 @@
 #define	FILE_BLOCKS	(NPAR)
 #define BLOCK_TAG	"test data in block %d"
 
+#define	TST_KILL	0x01
+#define	TST_CORE	0x02
+#define	TST_STOP	0x04
+#define	TST_IGN		0x08
+#define	TST_STP_CONT	0x10
+#define	TST_STP_KILL	0x20
+
 static int tc;
 static char tst_file[80];
 
@@ -1908,11 +1915,13 @@ test31(char *fname)
 			t_err("setup", rc, errno);
 	}
 
-	/* this should fail */
-	ctx = 0;
-	rc = io_setup(NPAR, &ctx);
-	if (rc == 0 || errno != ENOMEM)
-		tfail("io_setup of 513 context's succeeded");
+	/* this should fail on lx */
+	if (is_lx) {
+		ctx = 0;
+		rc = io_setup(NPAR, &ctx);
+		if (rc == 0 || errno != ENOMEM)
+			tfail("io_setup of 513 context's succeeded");
+	}
 
 	for (i = 0; i < 512; i++) {
 		rc = io_destroy(ctxa[i]);
@@ -1922,6 +1931,210 @@ test31(char *fname)
 
 	return (0);
 }
+
+/*
+ * Test fork and vfork with an active context and ensure worker threads are
+ * still running.
+ */
+static int
+test32(char *fname)
+{
+	int fd, rc, i, pid, status;
+	struct iocb **ioq;
+	aio_context_t ctx;
+	struct io_event events[NPAR];
+
+	tc = 32;
+	if ((fd = open(fname, O_RDONLY)) < 0)
+		t_err("open", fd, errno);
+
+	ctx = 0;
+	rc = io_setup(NPAR, &ctx);
+	if (rc < 0)
+		t_err("setup", rc, errno);
+
+	ioq = (struct iocb **)malloc(sizeof (struct iocb *) * NPAR);
+	if (ioq == NULL)
+		tfail("out of memory");
+
+	for (i = 0; i < NPAR; i++) {
+		ioq[i] = mk_cb(fd, IOCB_CMD_PREAD, i * BLKSIZE, (long)i);
+	}
+
+	pid = fork();
+	if (pid == 0)
+		exit(0);
+
+	waitpid(pid, &status, 0);
+
+	/* Ensure worker threads are still running after the fork */
+	rc = io_submit(ctx, NPAR, ioq);
+	if (rc != NPAR)
+		t_err("submit", rc, errno);
+
+	rc = io_getevents(ctx, NPAR, NPAR, events, NULL);
+	if (rc != NPAR)
+		t_err("getevents", rc, errno);
+
+	pid = vfork();
+	if (pid == 0)
+		exit(0);
+
+	/* Ensure worker threads are still running after the vfork */
+	rc = io_submit(ctx, NPAR, ioq);
+	if (rc != NPAR)
+		t_err("submit", rc, errno);
+
+	rc = io_getevents(ctx, NPAR, NPAR, events, NULL);
+	if (rc != NPAR)
+		t_err("getevents", rc, errno);
+
+	rc = io_destroy(ctx);
+	if (rc != 0)
+		t_err("destroy", rc, errno);
+
+	close(fd);
+	close(evfd);
+	return (0);
+}
+
+/*
+ * Test various signals sent to a child process waiting on aio.
+ */
+static int
+test33(char *fname)
+{
+	int i;
+	struct sig_res {
+		int sr_sig;
+		int sr_flag;
+	} sr[] = {
+		{SIGHUP,	TST_KILL},
+		{SIGINT,	TST_KILL},
+		{SIGQUIT,	TST_CORE},
+		{SIGTRAP,	TST_CORE},
+		{SIGABRT,	TST_CORE},
+		{SIGKILL,	TST_KILL},
+		{SIGSEGV,	TST_CORE},
+		{SIGALRM,	TST_KILL},
+		{SIGWINCH,	TST_IGN},
+		{SIGSTOP,	TST_STOP | TST_STP_CONT},
+		{SIGSTOP,	TST_STOP | TST_STP_KILL},
+		{SIGTSTP,	TST_STOP | TST_STP_CONT},
+		{SIGTSTP,	TST_STOP | TST_STP_KILL},
+		{0, 0},
+	};
+
+	tc = 33;
+	for (i = 0; sr[i].sr_sig != 0; i++) {
+		int pid;
+		siginfo_t si;
+
+		pid = fork();
+		if (pid < -1)
+			t_err("fork", pid, errno);
+
+		if (pid == 0) {
+			/* child */
+			int rc;
+			aio_context_t ctx;
+			struct io_event events[NPAR];
+
+			ctx = 0;
+			if ((rc = io_setup(NPAR, &ctx)) < 0)
+				t_err("setup", rc, errno);
+
+			/* block forever */
+			rc = io_getevents(ctx, NPAR, NPAR, events, NULL);
+
+			/* we should never return from io_getevents */
+			tfail("returned");
+		}
+
+		nanosleep(&delay, NULL);
+
+		(void) kill(pid, sr[i].sr_sig);
+
+		bzero(&si, sizeof (si));
+		if ((sr[i].sr_flag & TST_IGN) == 0) {
+			waitid(P_PID, pid, &si, WEXITED | WSTOPPED);
+		} else {
+			nanosleep(&delay, NULL);
+			waitid(P_PID, pid, &si, WEXITED | WSTOPPED | WNOHANG);
+		}
+
+		if (sr[i].sr_flag & TST_KILL) {
+			if (si.si_code != CLD_KILLED ||
+			    si.si_status != sr[i].sr_sig) {
+				printf("FAIL aio %d, code: %d status: %d\n",
+				    tc, si.si_code, si.si_status);
+				exit(1);
+			}
+
+		} else if (sr[i].sr_flag & TST_CORE) {
+			if (si.si_code != CLD_DUMPED ||
+			    si.si_status != sr[i].sr_sig) {
+				printf("FAIL aio %d, code: %d status: %d\n",
+				    tc, si.si_code, si.si_status);
+				exit(1);
+			}
+
+		} else if (sr[i].sr_flag & TST_STOP) {
+			if (si.si_code != CLD_STOPPED ||
+			    si.si_status != sr[i].sr_sig) {
+				printf("FAIL aio %d, code: %d status: %d\n",
+				    tc, si.si_code, si.si_status);
+				exit(1);
+			}
+
+			if (sr[i].sr_flag & TST_STP_CONT) {
+				(void) kill(pid, SIGCONT);
+				waitid(P_PID, pid, &si,
+				    WEXITED | WSTOPPED | WCONTINUED);
+				if (si.si_code != CLD_CONTINUED ||
+				    si.si_status != SIGCONT) {
+					printf("FAIL aio %d, code: %d "
+					    "status: %d\n",
+					    tc, si.si_code, si.si_status);
+					exit(1);
+				}
+			}
+
+			/* else TST_STP_KILL - kill while stopped */
+
+			(void) kill(pid, SIGKILL);
+			waitid(P_PID, pid, &si, WEXITED | WSTOPPED);
+			if (si.si_code != CLD_KILLED ||
+			    si.si_status != SIGKILL) {
+				printf("FAIL aio %d, code: %d "
+				    "status: %d\n",
+				    tc, si.si_code, si.si_status);
+				exit(1);
+			}
+
+		} else if (sr[i].sr_flag & TST_IGN) {
+			if (si.si_code != 0 || si.si_status != 0) {
+				printf("FAIL aio %d, code: %d status: %d\n",
+				    tc, si.si_code, si.si_status);
+				exit(1);
+			}
+
+			/* kill it now */
+			(void) kill(pid, SIGKILL);
+			waitid(P_PID, pid, &si, WEXITED | WSTOPPED);
+			if (si.si_code != CLD_KILLED ||
+			    si.si_status != SIGKILL) {
+				printf("FAIL aio %d, code: %d "
+				    "status: %d\n",
+				    tc, si.si_code, si.si_status);
+				exit(1);
+			}
+		}
+	}
+
+	return (0);
+}
+
 
 int
 main(int argc, char **argv)
@@ -1967,8 +2180,9 @@ main(int argc, char **argv)
 	test28(tst_file);
 	test29(tst_file);
 	test30(tst_file);
-	if (is_lx)	/* Linux can do more, but we don't care  */
-		test31(tst_file);
+	test31(tst_file);
+	test32(tst_file);
+	run_as_proc(33, test33, tst_file);
 
 	unlink(tst_file);
 	return (test_pass("aio"));
