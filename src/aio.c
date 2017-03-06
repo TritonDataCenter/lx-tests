@@ -30,6 +30,7 @@
 #define	BLKSIZE		(512)
 #define	NPAR		(4)
 #define	FILE_BLOCKS	(NPAR)
+#define	BIG_FILE	512
 #define BLOCK_TAG	"test data in block %d"
 
 #define	TST_KILL	0x01
@@ -247,15 +248,15 @@ test1(char *fname)
 		t_err("open", fd, errno);
 
 	ctx = 0;
-	rc = io_setup(NPAR, &ctx);
+	rc = io_setup(BIG_FILE, &ctx);
 	if (rc < 0)
 		t_err("setup", rc, errno);
 
-	ioq = (struct iocb **)malloc(sizeof (struct iocb *) * NPAR);
+	ioq = (struct iocb **)malloc(sizeof (struct iocb *) * BIG_FILE);
 	if (ioq == NULL)
 		tfail("out of memory");
 
-	for (i = 0; i < NPAR; i++) {
+	for (i = 0; i < BIG_FILE; i++) {
 		char *buf;
 		struct iocb *io;
 
@@ -284,12 +285,12 @@ test1(char *fname)
 	close(rand_fd);
 
 	/* Submit parallel writes */
-	rc = io_submit(ctx, NPAR, ioq);
-	if (rc != NPAR)
+	rc = io_submit(ctx, BIG_FILE, ioq);
+	if (rc != BIG_FILE)
 		t_err("submit", rc, errno);
 
 	/* Validate IO one at a time until completed */
-	for (i = 0; i < NPAR; i++) {
+	for (i = 0; i < BIG_FILE; i++) {
 		struct io_event event, *ep = &event;
 		struct iocb *iop;
 		int n;
@@ -302,7 +303,7 @@ test1(char *fname)
 
 		n = (int)ep->data;
 
-		if (n < 0 || n >= NPAR)
+		if (n < 0 || n >= BIG_FILE)
 			tfail("unexpected data tag");
 
 		if (ep->res != BLKSIZE)
@@ -1766,9 +1767,6 @@ t29()
 		if (rc < 0)
 			t_err("getevents", rc, errno);
 
-		if (rc < u)
-			tfail("getevents did not get everything");
-
 		for (i = 0; i < rc; i++) {
 			struct io_event *ep = &events[i];
 			struct iocb *iop;
@@ -1910,15 +1908,18 @@ test31(char *fname)
 
 	for (i = 0; i < 512; i++) {
 		ctxa[i] = 0;
-		rc = io_setup(NPAR, &ctxa[i]);
-		if (rc < 0)
+		rc = io_setup(1, &ctxa[i]);
+		if (rc < 0) {
+			fprintf(stderr, "Failed creating context %d, "
+			    "is max-lwps set? [need ~ 1k]\n", i);
 			t_err("setup", rc, errno);
+		}
 	}
 
 	/* this should fail on lx */
 	if (is_lx) {
 		ctx = 0;
-		rc = io_setup(NPAR, &ctx);
+		rc = io_setup(1, &ctx);
 		if (rc == 0 || errno != ENOMEM)
 			tfail("io_setup of 513 context's succeeded");
 	}
@@ -2135,6 +2136,74 @@ test33(char *fname)
 	return (0);
 }
 
+static void
+t34()
+{
+	int rc;
+	struct io_event events[BIG_FILE];
+	/* Use timeout in case state changes after check but before syscall */
+	struct timespec timeout = { 1, 0 };
+
+	while (state == 0) {
+		rc = io_getevents(gctx, 1, BIG_FILE, events, &timeout);
+		if (rc < 0)
+			t_err("getevents", rc, errno);
+	}
+}
+
+/*
+ * Load stress test pushing a lot of I/O as fast as possible.
+ */
+static int
+test34(char *fname)
+{
+	int fd, rc, i;
+	struct iocb **ioq;
+	pthread_t tid;
+
+	tc = 34;
+	if ((fd = open(fname, O_RDONLY)) < 0)
+		t_err("open", fd, errno);
+
+	gctx = 0;
+	state = 0;
+	rc = io_setup(BIG_FILE * 10, &gctx);
+	if (rc < 0)
+		t_err("setup", rc, errno);
+
+	pthread_create(&tid, NULL, (void *(*)(void *))t34, (void *)NULL);
+
+	ioq = (struct iocb **)malloc(sizeof (struct iocb *) * BIG_FILE);
+	if (ioq == NULL)
+		tfail("out of memory");
+
+	for (i = 0; i < BIG_FILE; i++) {
+		ioq[i] = mk_cb(fd, IOCB_CMD_PREAD, i * BLKSIZE, (long)i);
+	}
+
+	for (i = 0; i < 100; i++) {
+		errno = 0;
+		rc = io_submit(gctx, BIG_FILE, ioq);
+		if (rc < 0) {
+			if (errno == EAGAIN) {
+				nanosleep(&delay, NULL);
+			} else {
+				t_err("submit", rc, errno);
+			}
+		}
+	}
+
+	state = 1;
+	pthread_join(tid, NULL);
+
+	rc = io_destroy(gctx);
+	if (rc != 0)
+		t_err("destroy", rc, errno);
+
+	close(fd);
+	return (0);
+}
+
 
 int
 main(int argc, char **argv)
@@ -2183,6 +2252,7 @@ main(int argc, char **argv)
 	test31(tst_file);
 	test32(tst_file);
 	run_as_proc(33, test33, tst_file);
+	run_as_proc(34, test34, tst_file);
 
 	unlink(tst_file);
 	return (test_pass("aio"));
