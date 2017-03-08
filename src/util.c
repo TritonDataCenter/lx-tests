@@ -12,21 +12,21 @@
 #include "lxtst.h"
 
 int
-test_pass(char *name)
+test_pass(const char *name)
 {
 	printf("PASS %s\n", name);
 	return (0);
 }
 
 int
-test_fail(char *name, char *msg)
+test_fail(const char *name, const char *msg)
 {
 	printf("FAIL %s: %s\n", name, msg);
 	return (1);
 }
 
 int
-test_skip(char *name, char *why)
+test_skip(const char *name, const char *why)
 {
 	printf("SKIP %s: %s\n", name, why);
 	return (0);

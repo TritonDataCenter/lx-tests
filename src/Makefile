@@ -12,6 +12,7 @@ TESTS = \
 	aio \
 	clone \
 	futex \
+	memcntl \
 	mount_nfs \
 	mount_tmpfs \
 	procfs \
@@ -20,16 +21,21 @@ TESTS = \
 	uname \
 	vdisk
 
+THREADED_TESTS = \
+    aio \
+    sched \
+    clone \
+    futex
+
 SUBDIRS = vdso
 
 COMMON_OBJS = util.o
 
 CFLAGS += -Wall -Werror
 
-aio: LDFLAGS += -lpthread
-sched: LDFLAGS += -lpthread
-clone: LDFLAGS += -lpthread
-futex: LDFLAGS += -lpthread
+$(THREADED_TESTS): LDFLAGS += -lpthread
+
+memcntl: CFLAGS += -std=c99 -D_GNU_SOURCE
 
 all: $(TESTS) $(SUBDIRS)
 	@for d in $(SUBDIRS); do $(MAKE) -C $$d all; done

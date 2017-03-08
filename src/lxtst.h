@@ -5,14 +5,14 @@
  */
 
 /*
- * Copyright (c) 2016, Joyent, Inc.
+ * Copyright (c) 2017, Joyent, Inc.
  */
 
 #ifndef _LXTST_H
 #define _LXTST_H
 
-int test_pass(char *);
-int test_fail(char *, char *);
-int test_skip(char *, char *);
+int test_pass(const char *);
+int test_fail(const char *, const char *);
+int test_skip(const char *, const char *);
 
 #endif /* _LXTST_H */
