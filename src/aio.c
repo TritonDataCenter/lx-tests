@@ -815,7 +815,7 @@ test10(char *fname)
 			snprintf(tag, sizeof (tag), BLOCK_TAG, n);
 			len = strlen(tag);
 		} else {
-			snprintf(tag, sizeof (tag), "/*\n * Copyright 20");
+			snprintf(tag, sizeof (tag), "/*\n * This Source Code");
 			len = strlen(tag);
 		}
 
