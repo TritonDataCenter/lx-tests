@@ -18,6 +18,7 @@ TESTS = \
 	procfs \
 	sched \
 	socket \
+	sysfs \
 	uname \
 	vdisk
 
