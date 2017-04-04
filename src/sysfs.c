@@ -19,6 +19,7 @@
 #include <sys/vfs.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/utsname.h>
 #include <linux/magic.h>
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -95,13 +96,11 @@ tfail(char *msg)
 }
 
 /*
- * Verify we have the same inode for a subdir and '.' in that subdir across
- * one of the subdirs we know changes "class" within our implementation of
- * sysfs. Obviously this is a regression test since our code used to be
- * broken this way.
+ * Verify we have the same inode for a subdir and '.' in that subdir. Obviously
+ * this is a regression test since our code used to be broken this way.
  */
 static int
-check_inode(char *path, char *subdir)
+check_inode(char *path)
 {
 	int fd, nread;
 	char buf[BUF_SIZE];
@@ -109,6 +108,14 @@ check_inode(char *path, char *subdir)
 	int bpos;
 	char pdir[1024];
 	long subdir_ino;
+	char *subdir, *p;
+
+	if ((p = strrchr(path, '/')) == NULL)
+		return (0);
+	*p = '\0';
+	subdir = p + 1;
+	if (*path == '\0')
+		return (0);
 
 	fd = open(path, O_RDONLY | O_DIRECTORY);
 	if (fd == -1)
@@ -140,6 +147,7 @@ check_inode(char *path, char *subdir)
 	for (bpos = 0; bpos < nread;) {
 		d = (l_dirent_t *) (buf + bpos);
 		if (strcmp(d->d_name, ".") == 0) {
+printf("check %s/%s %s/.\n",  path, subdir, pdir);
 			if (d->d_ino != subdir_ino) {
 				char e[128];
 
@@ -156,7 +164,7 @@ check_inode(char *path, char *subdir)
 	}
 	close(fd);
 
-	return (0);
+	return (check_inode(path));
 }
 
 static char
@@ -217,7 +225,14 @@ int
 main(int argc, char **argv)
 {
 	struct statfs sfs;
+	char path[1024];
 	char e[80];
+	struct utsname nm;
+	int is_lx = 0;
+
+	uname(&nm);
+	if (strstr(nm.version, "BrandZ") != NULL)
+		is_lx = 1;
 
 	/* check sysfs magic number */
 	tc = 1;
@@ -234,11 +249,21 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * check inode consistency across a spot we know transitions internally
+	 * check inode consistency across spots we know transition internally
 	 */
 	tc = 2;
-	if (check_inode(MNT_PNT, "block") != 0)  {
-		tfail("inodes don't match");
+	/* gcc apprently puts string constants into a non-writable page */
+	strcpy(path, MNT_PNT "/block");
+	check_inode(path);
+	strcpy(path, MNT_PNT "/class/net/lo");
+	check_inode(path);
+	strcpy(path, MNT_PNT "/devices/system/node/node0");
+	check_inode(path);
+	strcpy(path, MNT_PNT "/devices/virtual/net/lo");
+	check_inode(path);
+	if (is_lx) {
+		strcpy(path, MNT_PNT "/devices/zfs/zfsds0");
+		check_inode(path);
 	}
 
 	tc = 3;
