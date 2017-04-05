@@ -147,7 +147,6 @@ check_inode(char *path)
 	for (bpos = 0; bpos < nread;) {
 		d = (l_dirent_t *) (buf + bpos);
 		if (strcmp(d->d_name, ".") == 0) {
-printf("check %s/%s %s/.\n",  path, subdir, pdir);
 			if (d->d_ino != subdir_ino) {
 				char e[128];
 
@@ -255,7 +254,7 @@ main(int argc, char **argv)
 	/* gcc apprently puts string constants into a non-writable page */
 	strcpy(path, MNT_PNT "/block");
 	check_inode(path);
-	strcpy(path, MNT_PNT "/class/net/lo");
+	strcpy(path, MNT_PNT "/class/net");
 	check_inode(path);
 	strcpy(path, MNT_PNT "/devices/system/node/node0");
 	check_inode(path);
