@@ -77,6 +77,32 @@ dexpect_t devicesdir[] = {
 	{0, NULL}
 };
 
+dexpect_t systemdir[] = {
+	{DT_DIR, "cpu"},
+	{DT_DIR, "node"},
+	{0, NULL}
+};
+
+dexpect_t nodedir[] = {
+	{DT_DIR, "node0"},
+	{0, NULL}
+};
+
+dexpect_t node0dir[] = {
+	{DT_REG, "cpulist"},
+	{0, NULL}
+};
+
+dexpect_t cpudir[] = {
+	{DT_DIR, "cpu0"},
+	{DT_REG, "kernel_max"},
+	{DT_REG, "offline"},
+	{DT_REG, "online"},
+	{DT_REG, "possible"},
+	{DT_REG, "present"},
+	{0, NULL}
+};
+
 dexpect_t netlodir[] = {
 	{DT_REG, "address"},
 	{DT_REG, "addr_len"},
@@ -220,6 +246,21 @@ check_dir(char *path, dexpect_t *ents)
 	}
 }
 
+void
+use_twice()
+{
+	int fd1, fd2;
+
+	if ((fd1 = open(MNT_PNT "/devices/system/cpu/online", O_RDONLY, 0)) < 0)
+		tfail("open /sys/devices/system/cpu/online");
+
+	if ((fd2 = open(MNT_PNT "/devices/system/cpu/online", O_RDONLY, 0)) < 0)
+		tfail("open /sys/devices/system/cpu/online");
+
+	close(fd1);
+	close(fd2);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -241,10 +282,7 @@ main(int argc, char **argv)
 	if (sfs.f_type != SYSFS_MAGIC) {
 		snprintf(e, sizeof (e), "expected magic 0x%x, got 0x%x",
 		    (unsigned int)SYSFS_MAGIC, (unsigned int)sfs.f_type);
-		/*
 		tfail(e);
-		*/ 
-		printf("%s\n", e);
 	}
 
 	/*
@@ -257,6 +295,10 @@ main(int argc, char **argv)
 	strcpy(path, MNT_PNT "/class/net");
 	check_inode(path);
 	strcpy(path, MNT_PNT "/devices/system/node/node0");
+	check_inode(path);
+	strcpy(path, MNT_PNT "/devices/system/cpu");
+	check_inode(path);
+	strcpy(path, MNT_PNT "/devices/system/cpu/cpu0");
 	check_inode(path);
 	strcpy(path, MNT_PNT "/devices/virtual/net/lo");
 	check_inode(path);
@@ -281,7 +323,22 @@ main(int argc, char **argv)
 	check_dir(MNT_PNT "/devices", devicesdir);
 
 	tc = 8;
+	check_dir(MNT_PNT "/devices/system", systemdir);
+
+	tc = 9;
+	check_dir(MNT_PNT "/devices/system/cpu", cpudir);
+
+	tc = 10;
+	check_dir(MNT_PNT "/devices/system/node", nodedir);
+
+	tc = 11;
+	check_dir(MNT_PNT "/devices/system/node/node0", node0dir);
+
+	tc = 12;
 	check_dir(MNT_PNT "/devices/virtual/net/lo", netlodir);
+
+	tc = 13;
+	use_twice();
 
 	return (test_pass(TST_NAME));
 }
