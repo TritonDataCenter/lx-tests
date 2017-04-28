@@ -59,7 +59,6 @@ test_mlock()
 		{data, pagesize, 1, 0, "munlock success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
-	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
@@ -69,10 +68,10 @@ test_mlock()
 		} else {
 			munlock(tests[i].addr, tests[i].len);
 		}
-		if (tests[i].err != errno) {
-			snprintf(e, sizeof (e), "%s unexpected error %d",
-			    tests[i].name, errno);
-			tfail(e);
+		if (tests[i].err == errno) {
+			test_pass(tests[i].name);
+		} else {
+			test_fail(tests[i].name, "unexpected error");
 		}
 
 		tc++;
@@ -91,15 +90,14 @@ test_madvise()
 		{data, pagesize, MADV_NORMAL, 0, "madvise success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
-	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
 		madvise(tests[i].addr, tests[i].len, tests[i].flag);
-		if (tests[i].err != errno) {
-			snprintf(e, sizeof (e), "%s unexpected error %d",
-			    tests[i].name, errno);
-			tfail(e);
+		if (tests[i].err == errno) {
+			test_pass(tests[i].name);
+		} else {
+			test_fail(tests[i].name, "unexpected error");
 		}
 
 		tc++;
@@ -120,15 +118,14 @@ test_mprotect()
 		{data, pagesize, PROT_READ|PROT_WRITE, 0, "mprotect success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
-	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
 		mprotect(tests[i].addr, tests[i].len, tests[i].flag);
-		if (tests[i].err != errno) {
-			snprintf(e, sizeof (e), "%s unexpected error %d",
-			    tests[i].name, errno);
-			tfail(e);
+		if (tests[i].err == errno) {
+			test_pass(tests[i].name);
+		} else {
+			test_fail(tests[i].name, "unexpected error");
 		}
 
 		tc++;
@@ -146,15 +143,14 @@ test_msync()
 		{data, pagesize, MS_SYNC, 0, "msync success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
-	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
 		msync(tests[i].addr, tests[i].len, tests[i].flag);
-		if (tests[i].err != errno) {
-			snprintf(e, sizeof (e), "%s unexpected error %d",
-			    tests[i].name, errno);
-			tfail(e);
+		if (tests[i].err == errno) {
+			test_pass(tests[i].name);
+		} else {
+			test_fail(tests[i].name, "unexpected error");
 		}
 
 		tc++;
