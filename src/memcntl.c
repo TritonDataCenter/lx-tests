@@ -15,9 +15,14 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 
 #include "lxtst.h"
 
+#define TST_NAME	"memcntl"
+#define ONE_MB		(1024 * 1024)
+
+static int tc;
 static unsigned long pagesize = 0;
 static char *data = NULL;
 
@@ -28,6 +33,13 @@ struct memtest {
 	int	err;
 	char	*name;
 };
+
+static void
+tfail(char *msg)
+{
+	printf("FAIL %s %d: %s\n", TST_NAME, tc, msg);
+	exit(1);
+}
 
 static void
 test_mlock()
@@ -47,6 +59,7 @@ test_mlock()
 		{data, pagesize, 1, 0, "munlock success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
+	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
@@ -56,11 +69,13 @@ test_mlock()
 		} else {
 			munlock(tests[i].addr, tests[i].len);
 		}
-		if (tests[i].err == errno) {
-			test_pass(tests[i].name);
-		} else {
-			test_fail(tests[i].name, "unexpected error");
+		if (tests[i].err != errno) {
+			snprintf(e, sizeof (e), "%s unexpected error %d",
+			    tests[i].name, errno);
+			tfail(e);
 		}
+
+		tc++;
 	}
 }
 
@@ -76,15 +91,18 @@ test_madvise()
 		{data, pagesize, MADV_NORMAL, 0, "madvise success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
+	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
 		madvise(tests[i].addr, tests[i].len, tests[i].flag);
-		if (tests[i].err == errno) {
-			test_pass(tests[i].name);
-		} else {
-			test_fail(tests[i].name, "unexpected error");
+		if (tests[i].err != errno) {
+			snprintf(e, sizeof (e), "%s unexpected error %d",
+			    tests[i].name, errno);
+			tfail(e);
 		}
+
+		tc++;
 	}
 }
 
@@ -102,15 +120,18 @@ test_mprotect()
 		{data, pagesize, PROT_READ|PROT_WRITE, 0, "mprotect success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
+	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
 		mprotect(tests[i].addr, tests[i].len, tests[i].flag);
-		if (tests[i].err == errno) {
-			test_pass(tests[i].name);
-		} else {
-			test_fail(tests[i].name, "unexpected error");
+		if (tests[i].err != errno) {
+			snprintf(e, sizeof (e), "%s unexpected error %d",
+			    tests[i].name, errno);
+			tfail(e);
 		}
+
+		tc++;
 	}
 }
 
@@ -125,15 +146,120 @@ test_msync()
 		{data, pagesize, MS_SYNC, 0, "msync success"}
 	};
 	unsigned len = sizeof (tests) / sizeof (tests[0]);
+	char e[80];
 
 	for (unsigned i = 0; i < len; i++) {
 		errno = 0;
 		msync(tests[i].addr, tests[i].len, tests[i].flag);
-		if (tests[i].err == errno) {
-			test_pass(tests[i].name);
-		} else {
-			test_fail(tests[i].name, "unexpected error");
+		if (tests[i].err != errno) {
+			snprintf(e, sizeof (e), "%s unexpected error %d",
+			    tests[i].name, errno);
+			tfail(e);
 		}
+
+		tc++;
+	}
+}
+
+static void
+test_lock_limits(char *p)
+{
+	struct rlimit l;
+	char e[80];
+	int am_root = (geteuid() == 0);
+	int r;
+
+	/*
+	 * We start by locking with whatever the current limit is.
+	 */
+	if (getrlimit(RLIMIT_MEMLOCK, &l) != 0) {
+		snprintf(e, sizeof (e), "getrlimit %d", errno);
+		tfail(e);
+	}
+
+	if (l.rlim_cur < (10 * ONE_MB)) {
+		snprintf(e, sizeof (e),
+		    "current locked mem limit is too low %ld",
+		    (long)l.rlim_cur);
+		tfail(e);
+	}
+
+	if (mlockall(MCL_CURRENT) != 0)
+		tfail("mlockall");
+
+	tc++;
+	if (munlockall() != 0)
+		tfail("munlockall");
+
+	tc++;
+	if (mlock(p, pagesize) != 0)
+		tfail("mlock");
+
+	tc++;
+	if (munlock(p, pagesize) != 0)
+		tfail("munlock");
+
+	/*
+	 * Now we set a pretty low limit, but one we should still pass.
+	 * NOTE: if the size of this test program expands, the 8MB limit
+	 * may need to increase.
+	 */
+	l.rlim_max = 10 * ONE_MB;
+	l.rlim_cur = 8 * ONE_MB;
+
+	tc++;
+	if (setrlimit(RLIMIT_MEMLOCK, &l) != 0) {
+		perror("setrlimit");
+		exit(1);
+	}
+
+	if (mlockall(MCL_CURRENT) != 0)
+		tfail("mlockall");
+
+	tc++;
+	if (munlockall() != 0)
+		tfail("munlockall");
+
+	tc++;
+	if (mlock(p, pagesize) != 0)
+		tfail("mlock");
+
+	tc++;
+	if (munlock(p, pagesize) != 0)
+		tfail("munlock");
+
+	/*
+	 * Now we set a limit of 0. We should fail if we're running as a
+	 * regular user, but pass if we're running as a privileged user.
+	 */
+	l.rlim_max = 10 * ONE_MB;
+	l.rlim_cur = 0;
+
+	tc++;
+	if (setrlimit(RLIMIT_MEMLOCK, &l) != 0) {
+		perror("setrlimit");
+		exit(1);
+	}
+
+	r = mlockall(MCL_CURRENT);
+	if ((am_root && r != 0) || (!am_root && r == 0))
+		tfail("mlockall");
+
+	if (am_root) {
+		tc++;
+		if (munlockall() != 0)
+			tfail("munlockall");
+	}
+
+	tc++;
+	r = mlock(p, pagesize);
+	if ((am_root && r != 0) || (!am_root && r == 0))
+		tfail("mlock");
+
+	if (am_root) {
+		tc++;
+		if (munlock(p, pagesize) != 0)
+			tfail("munlock");
 	}
 }
 
@@ -162,10 +288,13 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	tc = 1;
+
 	test_mlock();
 	test_madvise();
 	test_mprotect();
 	test_msync();
+	test_lock_limits(data);
 
-	exit(EXIT_SUCCESS);
+	return (test_pass(TST_NAME));
 }
