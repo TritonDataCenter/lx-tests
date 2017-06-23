@@ -5,7 +5,7 @@
  */
 
 /*
- * Copyright (c) 2016, Joyent, Inc.
+ * Copyright (c) 2017, Joyent, Inc.
  */
 
 #include <unistd.h>
@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <linux/hdreg.h>
 
 #include "lxtst.h"
@@ -26,42 +27,69 @@
 #define O_DIRECT        00040000        /* direct disk access hint */
 #endif
 
+static int tc;
+
+static void
+tfail(char *msg)
+{
+	printf("FAIL %s %d: %s\n", TST_NAME, tc, msg);
+	exit(1);
+}
+
+static void
+tst_fd(int fd)
+{
+	unsigned long val;
+	unsigned long long val64;
+	struct hd_geometry g;
+
+	if (ioctl(fd, BLKGETSIZE, &val) == -1)
+		tfail("BLKGETSIZE ioctl");
+
+        if (ioctl(fd, BLKGETSIZE64, &val64) == -1)
+		tfail("BLKGETSIZE64 ioctl");
+
+        if (ioctl(fd, BLKSSZGET, &val) == -1)
+		tfail("BLKSSZGET ioctl");
+
+        if (ioctl(fd, HDIO_GETGEO, &g) == -1)
+		tfail("HDIO_GETGEO ioctl");
+}
+
 int
 main(int argc, char *argv[])
 {
 	int fd;
-	unsigned long val;
-	unsigned long long val64;
-	struct hd_geometry g;
 	struct stat sb;
 
-	if (stat(DSK_NAME, &sb) != 0)
-		return (test_skip(TST_NAME, "no virtual disk configured"));
+	tc = 1;
+	if ((fd = open("/dev/zfsds0", O_RDONLY)) < 0)
+		tfail("/dev/zfs - open failed");
 
-	if (geteuid() != 0)
-		return (test_skip(TST_NAME, "not root"));
+	tst_fd(fd);
 
-	/* Test 1 - is it a block device? */
-	if ((sb.st_mode & S_IFMT) != S_IFBLK) {
-		return (test_fail(TST_NAME, "vdisk 1 - not a block device"));
+	close(fd);
+
+	if (stat(DSK_NAME, &sb) != 0) {
+		printf("%s: no virtual disk configured, skipping remaining "
+		    "tests\n", TST_NAME);
+		return (test_pass(TST_NAME));
 	}
 
-	/* Test 2 - ioctls */
+	if (geteuid() != 0) {
+		printf("%s: not root, skipping remaining tests\n", TST_NAME);
+		return (test_pass(TST_NAME));
+	}
+
+	tc = 2;
+	if ((sb.st_mode & S_IFMT) != S_IFBLK)
+		tfail("not a block device");
+
 	if ((fd = open(DSK_NAME, O_RDWR | O_EXCL | O_NONBLOCK | O_DIRECT,
 	    0)) < 0)
-		return (test_fail(TST_NAME, "vdisk - open failed"));
+		tfail("/dev/zvol0 - open failed");
 
-	if (ioctl(fd, BLKGETSIZE, &val) == -1)
-		return (test_fail(TST_NAME, "vdisk 2 - BLKGETSIZE ioctl"));
-
-        if (ioctl(fd, BLKGETSIZE64, &val64) == -1)
-		return (test_fail(TST_NAME, "vdisk 2 - BLKGETSIZE64 ioctl"));
-
-        if (ioctl(fd, BLKSSZGET, &val) == -1)
-		return (test_fail(TST_NAME, "vdisk 2 - BLKSSZGET ioctl"));
-
-        if (ioctl(fd, HDIO_GETGEO, &g) == -1)
-		return (test_fail(TST_NAME, "vdisk 2 - HDIO_GETGEO ioctl"));
+	tst_fd(fd);
 
 	close(fd);
 
