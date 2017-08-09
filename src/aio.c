@@ -526,9 +526,10 @@ test6(char *fname)
 {
 	int i, fd, rc;
 	int n = 1024;
+	int last_cancelled = 0;
 	aio_context_t ctx;
 	struct iocb **ioq;
-	struct io_event event;
+	struct io_event dummy;
 
 	tc = 6;
 	/* initialize */
@@ -553,11 +554,45 @@ test6(char *fname)
 	if (rc != n)
 		t_err("submit", rc, errno);
 
-	/* cancel last one */
-	/* result arg is no longer used in Linux */
-	rc = io_cancel(ctx, ioq[i], &event);
-	if (rc == -1 && errno != EAGAIN && errno != EINVAL)
+	/*
+	 * cancel last one
+	 * result arg (dummy) is not used in Linux
+	 *
+	 * Linux never returns 0 from io_cancel. A successful cancellation
+	 * will return EINPROGRESS and the result will be available via
+	 * the normal io_getevents call. Note that in Linux, only the USB
+	 * driver currently support aio cancellation, so most tests will always
+	 * get EINVAL when this is run on Linux.
+	 */
+	rc = io_cancel(ctx, ioq[i], &dummy);
+	if (rc == 0 ||
+	    (rc == -1 &&
+	    errno != EAGAIN && errno != EINVAL && errno != EINPROGRESS))
 		t_err("cancel", rc, errno);
+
+	if (errno == EINPROGRESS) {
+		last_cancelled = 1;
+	}
+
+	/* Validate IO one at a time until completed */
+	for (i = 0; i < n; i++) {
+		struct io_event event, *ep = &event;
+		struct iocb *iop;
+
+		rc = io_getevents(ctx, 1, 1, &event, NULL);
+		if (rc != 1)
+			t_err("getevents", rc, errno);
+
+		iop = (struct iocb *)ep->obj;
+
+		if (last_cancelled == 1 && (int)ep->data == (n - 1)) {
+			if (ep->res != -EINTR)
+				t_err("cancel result", n, ep->res);
+		}
+
+		free((void *)iop->aio_buf);
+		free(iop);
+	}
 
 	rc = io_destroy(ctx);
 	if (rc != 0)
