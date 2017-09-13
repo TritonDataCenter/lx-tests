@@ -5,7 +5,7 @@
 #
 
 #
-# Copyright (c) 2016, Joyent, Inc.
+# Copyright (c) 2017, Joyent, Inc.
 #
 
 TESTS = \
@@ -18,6 +18,7 @@ TESTS = \
 	procfs \
 	sched \
 	socket \
+	splice \
 	sysfs \
 	uname \
 	vdisk
@@ -26,6 +27,7 @@ THREADED_TESTS = \
     aio \
     sched \
     clone \
+    splice \
     futex
 
 SUBDIRS = vdso
