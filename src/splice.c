@@ -611,19 +611,63 @@ test8()
 }
 
 /*
+ * Test a splice from an empty pipe into a file. This should block until
+ * our alarm goes off and splice should return EINTR.
+ */
+static void
+test9()
+{
+	int rc, tfd, pfd[2];
+	ssize_t s;
+	struct sigaction act;
+
+	tc = 9;
+	if ((tfd = open(TMP_FILE, O_WRONLY | O_CREAT, 0644)) < 0)
+		t_err("open", tfd, errno);
+
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	/* Setup alarm for one second so we break out of splice */
+	act.sa_flags = 0;
+	act.sa_sigaction = handler;
+	if ((rc = sigaction(SIGALRM, &act, NULL)) != 0)
+		t_err("sigaction", rc, errno);
+	timed_out = 0;
+	alarm(1);
+
+	s = splice(pfd[0], NULL, tfd, NULL, (64 * 1024), SPLICE_F_MOVE);
+	if (s != -1 || errno != EINTR) {
+		char buf[80];
+		snprintf(buf, sizeof (buf), "expected errno EINTR, got %d",
+		    (int)errno);
+		tfail(buf);
+	}
+	if (timed_out != 1) {
+		tfail("expected time out");
+	}
+
+	close(tfd);
+	close(pfd[0]);
+	close(pfd[1]);
+
+	unlink(TMP_FILE);
+}
+
+/*
  * Test a splice from a really large data file into a pipe. The file
  * must be bigger than what can completely fit into a default sized pipe
  * so that the splice returns after only writing part of the data.
  */
 static void
-test9(int file_size)
+test10(int file_size)
 {
 	int rc, fd, tfd, pfd[2];
 	ssize_t s, len;
 	char buf[64 * 1024];
 	struct stat sb;
 
-	tc = 9;
+	tc = 10;
 	if ((fd = open(DFILE_NAME, O_RDONLY)) < 0)
 		t_err("open", fd, errno);
 
@@ -668,14 +712,14 @@ test9(int file_size)
  * splice should return EAGAIN.
  */
 static void
-test10(int file_size)
+test11(int file_size)
 {
 	int rc, fd, tfd, pfd[2];
 	ssize_t s0, s1, len;
 	char buf[64 * 1024];
 	struct stat sb;
 
-	tc = 10;
+	tc = 11;
 	if ((fd = open(DFILE_NAME, O_RDONLY)) < 0)
 		t_err("open", fd, errno);
 
@@ -729,7 +773,7 @@ test10(int file_size)
  * our alarm goes off and splice should return EINTR.
  */
 static void
-test11(int file_size)
+test12(int file_size)
 {
 	int rc, fd, tfd, pfd[2];
 	ssize_t s0, s1, len;
@@ -737,7 +781,7 @@ test11(int file_size)
 	struct stat sb;
 	struct sigaction act;
 
-	tc = 11;
+	tc = 12;
 	if ((fd = open(DFILE_NAME, O_RDONLY)) < 0)
 		t_err("open", fd, errno);
 
@@ -811,6 +855,7 @@ main(int argc, char **argv)
 	test6(64 * 1024);
 	test7(64 * 1024);
 	test8();
+	test9();
 
 	unlink(DFILE_NAME);
 
@@ -820,9 +865,9 @@ main(int argc, char **argv)
 	 */
 	create_data_file(128 * 1024);
 
-	test9(128 * 1024);
 	test10(128 * 1024);
 	test11(128 * 1024);
+	test12(128 * 1024);
 
 	unlink(DFILE_NAME);
 
