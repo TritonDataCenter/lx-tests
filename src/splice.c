@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/param.h>
 #include <errno.h>
+#include <signal.h>
 #include <string.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -35,6 +36,7 @@ extern ssize_t splice(int, loff_t *, int, loff_t *, size_t, unsigned int);
 
 static int tc;
 static int server_fd, server_acc_fd;
+static int timed_out;
 
 #define	DFLT_PIPE_SIZE	(64 * 1024)
 
@@ -149,6 +151,12 @@ sock_serv()
 	server_acc_fd = cl;
 
 	return (cl);
+}
+
+static void
+handler(int signo, siginfo_t *sip, void *cp)
+{
+	timed_out = 1;
 }
 
 static void
@@ -571,19 +579,51 @@ test7(int file_size)
 }
 
 /*
+ * Test a splice from an empty pipe into a file. This should not block and
+ * splice should return EAGAIN.
+ */
+static void
+test8()
+{
+	int rc, tfd, pfd[2];
+	ssize_t s;
+
+	tc = 8;
+	if ((tfd = open(TMP_FILE, O_WRONLY | O_CREAT, 0644)) < 0)
+		t_err("open", tfd, errno);
+
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	s = splice(pfd[0], NULL, tfd, NULL, (64 * 1024), SPLICE_F_NONBLOCK);
+	if (s != -1 || errno != EAGAIN) {
+		char buf[80];
+		snprintf(buf, sizeof (buf), "expected errno EAGAIN, got %d",
+		    (int)errno);
+		tfail(buf);
+	}
+
+	close(tfd);
+	close(pfd[0]);
+	close(pfd[1]);
+
+	unlink(TMP_FILE);
+}
+
+/*
  * Test a splice from a really large data file into a pipe. The file
  * must be bigger than what can completely fit into a default sized pipe
  * so that the splice returns after only writing part of the data.
  */
 static void
-test8(int file_size)
+test9(int file_size)
 {
 	int rc, fd, tfd, pfd[2];
 	ssize_t s, len;
 	char buf[64 * 1024];
 	struct stat sb;
 
-	tc = 8;
+	tc = 9;
 	if ((fd = open(DFILE_NAME, O_RDONLY)) < 0)
 		t_err("open", fd, errno);
 
@@ -623,6 +663,140 @@ test8(int file_size)
 	unlink(TMP_FILE);
 }
 
+/*
+ * Test a splice from a data file into a full pipe. This should not block and
+ * splice should return EAGAIN.
+ */
+static void
+test10(int file_size)
+{
+	int rc, fd, tfd, pfd[2];
+	ssize_t s0, s1, len;
+	char buf[64 * 1024];
+	struct stat sb;
+
+	tc = 10;
+	if ((fd = open(DFILE_NAME, O_RDONLY)) < 0)
+		t_err("open", fd, errno);
+
+	if ((tfd = open(TMP_FILE, O_WRONLY | O_CREAT, 0644)) < 0)
+		t_err("open", tfd, errno);
+
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	/* First fill the pipe */
+	s0 = splice(fd, NULL, pfd[1], NULL, (2 * file_size), SPLICE_F_MOVE);
+	if (s0 < 0)
+		t_err("splice", s0, errno);
+
+	if (s0 != DFLT_PIPE_SIZE) {
+		tfail("splice wrote the whole file");
+	}
+
+	/* Now try to put more into the pipe */
+	s1 = splice(fd, NULL, pfd[1], NULL, (2 * file_size), SPLICE_F_NONBLOCK);
+	if (s1 != -1 || errno != EAGAIN) {
+		snprintf(buf, sizeof (buf), "expected errno EAGAIN, got %d",
+		    (int)errno);
+		tfail(buf);
+	}
+
+	close(fd);
+	close(pfd[1]);
+
+	while ((len = read(pfd[0], buf, sizeof (buf))) != 0) {
+		(void) write(tfd, buf, len);
+	}
+
+	close(pfd[0]);
+
+	if ((rc = fstat(tfd, &sb)) < 0)
+		t_err("fstat", rc, errno);
+	if (s0 != sb.st_size) {
+		snprintf(buf, sizeof (buf), "expected %d, got %d",
+		    (int)s0, (int)sb.st_size);
+		tfail(buf);
+	}
+
+
+	close(tfd);
+	unlink(TMP_FILE);
+}
+
+/*
+ * Test a splice from a data file into a full pipe. This should block until
+ * our alarm goes off and splice should return EINTR.
+ */
+static void
+test11(int file_size)
+{
+	int rc, fd, tfd, pfd[2];
+	ssize_t s0, s1, len;
+	char buf[64 * 1024];
+	struct stat sb;
+	struct sigaction act;
+
+	tc = 11;
+	if ((fd = open(DFILE_NAME, O_RDONLY)) < 0)
+		t_err("open", fd, errno);
+
+	if ((tfd = open(TMP_FILE, O_WRONLY | O_CREAT, 0644)) < 0)
+		t_err("open", tfd, errno);
+
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	/* First fill the pipe */
+	s0 = splice(fd, NULL, pfd[1], NULL, (2 * file_size), SPLICE_F_MOVE);
+	if (s0 < 0)
+		t_err("splice", s0, errno);
+
+	if (s0 != DFLT_PIPE_SIZE) {
+		tfail("splice wrote the whole file");
+	}
+
+	/* Setup alarm for one second so we break out of splice */
+	act.sa_flags = 0;
+	act.sa_sigaction = handler;
+	if ((rc = sigaction(SIGALRM, &act, NULL)) != 0)
+		t_err("sigaction", rc, errno);
+	timed_out = 0;
+	alarm(1);
+
+	/* Now try to put more into the pipe */
+	s1 = splice(fd, NULL, pfd[1], NULL, (2 * file_size), SPLICE_F_MOVE);
+	if (s1 != -1 || errno != EINTR) {
+		snprintf(buf, sizeof (buf), "expected errno EINTR, got %d",
+		    (int)errno);
+		tfail(buf);
+	}
+	if (timed_out != 1) {
+		tfail("expected time out");
+	}
+
+	close(fd);
+	close(pfd[1]);
+
+	while ((len = read(pfd[0], buf, sizeof (buf))) != 0) {
+		(void) write(tfd, buf, len);
+	}
+
+	close(pfd[0]);
+
+	if ((rc = fstat(tfd, &sb)) < 0)
+		t_err("fstat", rc, errno);
+	if (s0 != sb.st_size) {
+		snprintf(buf, sizeof (buf), "expected %d, got %d",
+		    (int)s0, (int)sb.st_size);
+		tfail(buf);
+	}
+
+
+	close(tfd);
+	unlink(TMP_FILE);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -636,6 +810,7 @@ main(int argc, char **argv)
 	test5(64 * 1024);
 	test6(64 * 1024);
 	test7(64 * 1024);
+	test8();
 
 	unlink(DFILE_NAME);
 
@@ -645,7 +820,9 @@ main(int argc, char **argv)
 	 */
 	create_data_file(128 * 1024);
 
-	test8(128 * 1024);
+	test9(128 * 1024);
+	test10(128 * 1024);
+	test11(128 * 1024);
 
 	unlink(DFILE_NAME);
 
