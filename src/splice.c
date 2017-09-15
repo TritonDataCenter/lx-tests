@@ -19,6 +19,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/utsname.h>
 #include <sys/un.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -34,6 +35,7 @@ extern ssize_t splice(int, loff_t *, int, loff_t *, size_t, unsigned int);
 #define	SPLICE_F_MORE		0x04
 #define	SPLICE_F_GIFT		0x08
 
+static int is_lx = 0;
 static int tc;
 static int server_fd, server_acc_fd;
 static int timed_out;
@@ -44,6 +46,11 @@ static int timed_out;
 #define TMP_FILE	"/tmp/lx-tst-splice.out"
 #define LONG_STR \
     "This is a long string which we use to create a large test data file."
+
+typedef struct {
+	int	fd0;
+	int	fd1;
+} fd_args_t;
 
 static void
 tfail(char *msg)
@@ -151,6 +158,26 @@ sock_serv()
 	server_acc_fd = cl;
 
 	return (cl);
+}
+
+static int
+fd_close(void *a)
+{
+	int rc;
+	fd_args_t *ap = (fd_args_t *)a;
+	struct timespec delay;
+
+	delay.tv_sec = 0;
+	delay.tv_nsec = 1000000;
+
+	nanosleep(&delay, NULL);
+
+	if ((rc = close(ap->fd0)) != 0)
+		t_err("close", rc, errno);
+	if ((rc = close(ap->fd1)) != 0)
+		t_err("close", rc, errno);
+
+	return (0);
 }
 
 static void
@@ -841,9 +868,105 @@ test12(int file_size)
 	unlink(TMP_FILE);
 }
 
+/*
+ * Test a splice from a pipe to a data file which will error (/dev/full).
+ * Verify that the data in the pipe is still available.
+ */
+static void
+test13()
+{
+	int rc, fd, pfd[2];
+	ssize_t s, len, slen;
+	char *msg = "This is a test message.";
+	char buf[128];
+
+	tc = 13;
+	if ((fd = open("/dev/full", O_WRONLY)) < 0)
+		t_err("open", fd, errno);
+
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	/* First put a msg into the pipe */
+	slen = strlen(msg);
+	if ((rc = write(pfd[1], msg, slen)) != slen)
+		t_err("write", rc, errno);
+
+	s = splice(pfd[0], NULL, fd, NULL, slen, SPLICE_F_MOVE);
+	if (s != -1 || errno != ENOSPC) {
+		snprintf(buf, sizeof (buf), "expected errno ENOSPC, got %d",
+		    (int)errno);
+		tfail(buf);
+	}
+
+	len = read(pfd[0], buf, sizeof (buf));
+	if (len < 0) {
+		snprintf(buf, sizeof (buf), "read expected %d, got error %d",
+		    (int)slen, (int)errno);
+		tfail(buf);
+	}
+	buf[len] = '\0';
+	if (len != slen || strcmp(buf, msg) != 0) {
+		char emsg[1024];
+
+		snprintf(emsg, sizeof (emsg), "expected: %s, got %s",
+		    msg, buf);
+		tfail(emsg);
+	}
+
+	close(fd);
+	close(pfd[0]);
+
+}
+
+/*
+ * Test a splice from an empty pipe into a file. This should block. Another
+ * thread will then close the file descriptors being used in the splice.
+ */
+static void
+test14()
+{
+	pthread_t tid;
+	int rc, tfd, pfd[2];
+	ssize_t s;
+	fd_args_t a;
+
+	tc = 14;
+	if ((tfd = open(TMP_FILE, O_WRONLY | O_CREAT, 0644)) < 0)
+		t_err("open", tfd, errno);
+
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	a.fd0 = pfd[0];
+	a.fd1 = tfd;
+
+	pthread_create(&tid, NULL, (void *(*)(void *))fd_close, (void *)&a);
+
+	s = splice(pfd[0], NULL, tfd, NULL, (64 * 1024), SPLICE_F_MOVE);
+	if (s != -1 || errno != EINTR) {
+		char buf[80];
+		snprintf(buf, sizeof (buf), "expected errno EINTR, got %d",
+		    (int)errno);
+		tfail(buf);
+	}
+
+	pthread_join(tid, NULL);
+
+	close(pfd[1]);
+
+	unlink(TMP_FILE);
+}
+
 int
 main(int argc, char **argv)
 {
+	struct utsname nm;
+
+	uname(&nm);
+	if (strstr(nm.version, "BrandZ") != NULL)
+		is_lx = 1;
+
 	/* Create a 64k data file which will completely fit into a Linux pipe */
 	create_data_file(64 * 1024);
 
@@ -870,6 +993,10 @@ main(int argc, char **argv)
 	test12(128 * 1024);
 
 	unlink(DFILE_NAME);
+
+	test13();
+	if (is_lx)
+		test14();
 
 	return (test_pass("splice"));
 }
