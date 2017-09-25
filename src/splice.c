@@ -958,6 +958,38 @@ test14()
 	unlink(TMP_FILE);
 }
 
+/*
+ * Test a splice from a pipe into itself.
+ */
+static void
+test15()
+{
+	int rc, pfd[2];
+	ssize_t s, len;
+	char buf[64 * 1024];
+	char *msg = "This is a test message.";
+
+	tc = 15;
+	if ((rc = pipe(pfd)) != 0)
+		t_err("pipe", rc, errno);
+
+	/* First put a msg into the pipe */
+	len = strlen(msg);
+	if ((rc = write(pfd[1], msg, len)) != len)
+		t_err("write", rc, errno);
+
+	/* Now splice into itself */
+	s = splice(pfd[0], NULL, pfd[1], NULL, 128, SPLICE_F_MOVE);
+	if (s != -1 || errno != EINVAL) {
+		snprintf(buf, sizeof (buf), "expected errno EINVAL, got %d %d",
+		    (int)s, (int)errno);
+		tfail(buf);
+	}
+
+	close(pfd[1]);
+	close(pfd[0]);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -966,6 +998,8 @@ main(int argc, char **argv)
 	uname(&nm);
 	if (strstr(nm.version, "BrandZ") != NULL)
 		is_lx = 1;
+
+	unlink(TMP_FILE);
 
 	/* Create a 64k data file which will completely fit into a Linux pipe */
 	create_data_file(64 * 1024);
@@ -997,6 +1031,7 @@ main(int argc, char **argv)
 	test13();
 	if (is_lx)
 		test14();
+	test15();
 
 	return (test_pass("splice"));
 }
