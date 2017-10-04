@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 #include "lxtst.h"
 
 #define	TST_NAME	"prctl"
