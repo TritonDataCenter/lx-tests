@@ -15,6 +15,7 @@ TESTS = \
 	memcntl \
 	mount_nfs \
 	mount_tmpfs \
+	prctl \
 	procfs \
 	sched \
 	socket \
