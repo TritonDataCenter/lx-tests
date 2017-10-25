@@ -13,6 +13,7 @@ TESTS = \
 	clone \
 	futex \
 	memcntl \
+	mremap \
 	mount_nfs \
 	mount_tmpfs \
 	prctl \
