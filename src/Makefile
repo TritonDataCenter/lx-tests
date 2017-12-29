@@ -19,6 +19,7 @@ TESTS = \
 	prctl \
 	procfs \
 	sched \
+	sig \
 	socket \
 	splice \
 	sysfs \
