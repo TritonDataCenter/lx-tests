@@ -31,8 +31,6 @@
 
 #define _GNU_SOURCE
 #include <sys/syscall.h>
-#include <sys/ipc.h>
-#include <sys/sem.h>
 
 static int tc;
 static char tst_file[80];
@@ -40,10 +38,6 @@ static char tst_file[80];
 static int is_lx = 0;
 static int got_sig;
 static struct timespec delay;
-
-#define	SEMKEY	(1529)
-
-extern int semtimedop(int, struct sembuf *, size_t, const struct timespec *);
 
 static void
 tfail(char *msg)
@@ -251,28 +245,6 @@ child_fcntl(int pfd)
 
 	if (fcntl(fd, F_SETLKW, &fl) < 0)
                	t_err("fcntl", fd, errno);
-	exit(1);
-}
-
-static void
-child_sem(int pfd)
-{
-	int semid;
-	struct sembuf ops[1];
-
-	setup_sighand();
-
-	if ((semid = semget(SEMKEY, 1, 0666)) < 0)
-                t_err("semget", semid, errno);
-
-	/* tell the parent we're ready */
-	(void) write(pfd, "\n", 1);
-
-	ops[0].sem_num = 0;
-	ops[0].sem_op = 0;
-	ops[0].sem_flg = 0;
-	if (semtimedop(semid, ops, 1, NULL) < 0)
-               	t_err("semtimedop", -1, errno);
 	exit(1);
 }
 
@@ -555,72 +527,6 @@ test6()
 	return (0);
 }
 
-/*
- * Test restarted semtimedop.
- */
-static int
-test7()
-{
-	int pid;
-	int semid, pfd[2];
-	char buf[80];
-	int status;
-	int val;
-	struct sembuf ops[1];
-
-	tc = 7;
-
-	if (pipe(pfd) != 0)
-                t_err("pipe", 0, errno);
-
-	if ((semid = semget(SEMKEY, 1, 0666 | IPC_CREAT)) < 0)
-                t_err("semget", semid, errno);
-
-	val = 0;
-	if (semctl(semid, 0, SETVAL, val) < 0)
-                t_err("semget", -1, errno);
-
-	ops[0].sem_num = 0;
-	ops[0].sem_op = 1;
-	ops[0].sem_flg = SEM_UNDO;
-	if (semop(semid, ops, 1) < 0)
-                t_err("semop", -1, errno);
-
-	pid = fork();
-	if (pid == 0) {
-		close(pfd[0]);
-		child_sem(pfd[1]);
-		exit(0);
-	}
-	close(pfd[1]);
-
-	/* wait until child is ready */
-	if (read(pfd[0], buf, sizeof (buf)) < 0)
-                t_err("read", 0, errno);
-	nanosleep(&delay, NULL);
-
-	/* child semtimedop should get EINTR */
-	kill(pid, SIGINT);
-
-	/* wait a bit and terminate the child */
-	nanosleep(&delay, NULL);
-	kill(pid, SIGKILL);
-
-	waitpid(pid, &status, 0);
-	if (WEXITSTATUS(status) != 0)
-                t_err("waitpid", status, errno);
-	ops[0].sem_num = 0;
-	ops[0].sem_op = -1;
-	ops[0].sem_flg = 0;
-	if (semop(semid, ops, 1) < 0)
-                t_err("semop", -1, errno);
-	if (semctl(semid, 0, IPC_RMID) < 0)
-                t_err("semctl rm", -1, errno);
-
-	close(pfd[0]);
-	return (0);
-}
-
 int
 main(int argc, char **argv)
 {
@@ -634,14 +540,13 @@ main(int argc, char **argv)
 	if (strstr(nm.version, "BrandZ") != NULL)
 		is_lx = 1;
 
-	/* The following 7 cases test restartable syscalls */
+	/* The following 6 cases test restartable syscalls */
 	test1();	/* socket accept - no timeout - restart */
 	test2();	/* socket accept - timeout    - norestart */
 	test3();	/* socket recv   - no timeout - restart */
 	test4();	/* socket recv   - timeout    - no restart */
 	test5();	/* flock - restart */
 	test6();	/* fcntl - restart */
-	test7();	/* semtimedop - restart */
 
 	return (test_pass("sig"));
 }
