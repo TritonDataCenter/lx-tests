@@ -19,6 +19,7 @@
 #include <string.h>
 #include <errno.h>
 #include <linux/magic.h>
+#include <regex.h>
 
 #include "lxtst.h"
 
@@ -254,6 +255,70 @@ check_writable()
 	return (0);
 }
 
+static int
+read_file_line(const char *path, char *buf, size_t size)
+{
+	int ret = -1;
+	FILE *fp;
+	if ((fp = fopen(path, "r")) == NULL)
+		return ret;
+	ret = fgets(buf, size, fp) == NULL;
+	if (! ret)
+		buf[strlen(buf) - 1] = '\0';
+	fclose(fp);
+	return ret;
+}
+
+static int
+validate_uuid(const char *uuid)
+{
+	int res;
+	regex_t preg;
+	if (regcomp(&preg,
+		    "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}"
+		    "-[0-9a-f]{4}-[0-9a-f]{12}", REG_EXTENDED)) {
+		return 1;
+	}
+	res = regexec(&preg, uuid, 0, NULL, 0);
+	regfree(&preg);
+	return res;
+}
+
+/* Validate boot_id looks like a UUID and stays the same between reads. */
+static int
+check_kernel_random_boot_id()
+{
+	const char *path = "/proc/sys/kernel/random/boot_id";
+	char buf1[128], buf2[128];
+
+	if (read_file_line(path, buf1, sizeof (buf1))
+		|| read_file_line(path, buf2, sizeof (buf2)))
+		return (-1);
+	return strcmp(buf1, buf2) || validate_uuid(buf1);
+}
+
+/* Validate uuid looks like a UUID and change for each open. */
+static int
+check_kernel_random_uuid()
+{
+	const char *path = "/proc/sys/kernel/random/uuid";
+	char buf1[128], buf2[128], buf3[128];
+
+	/* open and read uuid 3 times, verify all reads generate a
+	   valid UUID and that they differ from each other. */
+	if (read_file_line(path, buf1, sizeof (buf1))
+		|| read_file_line(path, buf2, sizeof (buf2))
+		|| read_file_line(path, buf3, sizeof (buf3)))
+		return (-1);
+	if (strcmp(buf1, buf2) == 0
+		|| strcmp(buf1, buf3) == 0
+		|| strcmp(buf2, buf3) == 0)
+		return (-1);
+	return validate_uuid(buf1)
+		|| validate_uuid(buf2)
+		|| validate_uuid(buf3);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -290,6 +355,16 @@ main(int argc, char **argv)
 	/* Test 6 - are various files writable? */
 	if (check_writable() != 0)  {
 		return (test_fail(TST_NAME, "procfs 6 - writable files"));
+	}
+
+	/* Test 7 - /proc/sys/kernel/random/boot_id */
+	if (check_kernel_random_boot_id() != 0)  {
+		return (test_fail(TST_NAME, "procfs 7 - random boot_id"));
+	}
+
+	/* Test 8 - /proc/sys/kernel/random/uuid */
+	if (check_kernel_random_uuid() != 0)  {
+		return (test_fail(TST_NAME, "procfs 8 - random uuid"));
 	}
 
 	return (test_pass(TST_NAME));
